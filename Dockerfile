@@ -1,5 +1,5 @@
 ARG TERRAFORM_VERSION=latest
-ARG POWERSHELL_VERSION=latest
+ARG POWERSHELL_VERSION=preview
 FROM hashicorp/terraform:${TERRAFORM_VERSION} as terraform
 FROM mcr.microsoft.com/powershell:${POWERSHELL_VERSION}
 
@@ -8,3 +8,4 @@ COPY --from=terraform /bin/terraform /bin/terraform
 
 # Setup terraposh module
 COPY terraposh.ps* /usr/local/share/powershell/Modules/terraposh/
+ENV PSModuleAutoloadingPreference=All
