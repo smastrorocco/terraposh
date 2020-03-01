@@ -1,7 +1,0 @@
-.git/
-.githooks/
-.gitignore
-.editorconfig
-README.md
-.terraform/
-terraform.tfstate.d/

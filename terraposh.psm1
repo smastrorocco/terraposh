@@ -2,7 +2,6 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$VerbosePreference = 'Continue'
 
 function Invoke-Terraposh {
     param (
@@ -13,8 +12,6 @@ function Invoke-Terraposh {
         [string]$Workspace,
         [switch]$Explicit
     )
-
-    $TerraformCommand
 
     # Load terraposh config
     $Config = Get-Config -File $ConfigFile
@@ -38,19 +35,22 @@ function Invoke-Terraposh {
         else {
             switch -Regex ($TerraformCommand) {
                 '^plan|^apply' {
+                    Clear-TerraformEnvironment
                     Invoke-TerraformCommand -Command 'init'
                     Set-TerraformWorkspace -Workspace $Workspace
                     Invoke-TerraformCommand -Command $TerraformCommand
                 }
                 '^destroy' {
+                    Clear-TerraformEnvironment
                     Invoke-TerraformCommand -Command 'init'
                     $Workspace = Set-TerraformWorkspace -Workspace $Workspace -PassThru
                     Invoke-TerraformCommand -Command $TerraformCommand
-                    Set-TerraformWorkspace -Workspace 'default'
-                    Invoke-TerraformCommand -Command "workspace delete ${Workspace}"
+                    
+                    if ($Workspace -ne 'default') {
+                        Set-TerraformWorkspace -Workspace 'default'
+                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}"
+                    }
                 }
-                '^output' { Invoke-TerraformCommand -Command $TerraformCommand } # output to a directory from config
-                # '^validate' { Invoke-TerraformCommand -Command $TerraformCommand } # need to consider init -backend=false
                 default { Invoke-TerraformCommand -Command $TerraformCommand }
             }
         }
@@ -59,9 +59,10 @@ function Invoke-Terraposh {
         throw $_
     }
     finally {
-        Pop-Location -StackName 'terraposh' -ErrorAction SilentlyContinue
+        Pop-Location -StackName 'terraposh' -ErrorAction Ignore
     }
 }
+
 
 function Invoke-TerraformCommand {
     param (
@@ -87,7 +88,6 @@ function Get-Config {
     $SearchLoctaions = @(
         $File,
         $env:TERRAPOSH_CONFIG_JSON
-        # TODO: Support merge of a .terraposh.config.json found it working directory
     )
 
     # Default config
@@ -142,6 +142,12 @@ function Get-GitBranchName {
     return $GitBranchName
 }
 
+function Clear-TerraformEnvironment {
+    $TerraformEnvironmentFile = Join-Path -Path $PWD -ChildPath '.terraform' -AdditionalChildPath 'environment'
+    Write-Verbose -Message "Clear workspace file: ${TerraformEnvironmentFile}"
+    Remove-Item -Path $TerraformEnvironmentFile -ErrorAction Ignore | Out-Null
+}
+
 function Get-TerraformWorkspaceName {
     $Workspace = Get-GitBranchName
 
@@ -171,11 +177,11 @@ function Set-TerraformWorkspace {
         Write-Verbose -Message "Current workspaces available: $($CurrentWorkspacesAvailable -join ', ')"
 
         if ($CurrentWorkspacesAvailable -cmatch $Workspace) {
-            Write-Verbose "${Workspace} already exists, selecting it"
+            Write-Verbose -Message "${Workspace} already exists, selecting it"
             Invoke-TerraformCommand -Command "workspace select ${Workspace}" | Out-Null
         }
         else {
-            Write-Verbose "${Workspace} doesn't exist, creating it"
+            Write-Verbose -Message "${Workspace} doesn't exist, creating it"
             Invoke-TerraformCommand -Command "workspace new ${Workspace}" | Out-Null
         }
     }
@@ -185,6 +191,67 @@ function Set-TerraformWorkspace {
     }
 }
 
+# Helper functions
+function Invoke-TerraposhPlan {
+    param (
+        [string]$TerraformCommand,
+        [string]$ConfigFile,
+        [string]$Directory,
+        [string]$Workspace,
+        [switch]$Explicit
+    )
+
+    $PSBoundParameters.Remove('TerraformCommand') | Out-Null
+    Invoke-Terraposh -TerraformCommand "plan ${TerraformCommand}" @PSBoundParameters
+}
+
+function Invoke-TerraposhApply {
+    param (
+        [string]$TerraformCommand,
+        [string]$ConfigFile,
+        [string]$Directory,
+        [string]$Workspace,
+        [switch]$Explicit
+    )
+
+    $PSBoundParameters.Remove('TerraformCommand') | Out-Null
+    Invoke-Terraposh -TerraformCommand "apply ${TerraformCommand}" @PSBoundParameters
+}
+
+function Invoke-TerraposhDestroy {
+    param (
+        [string]$TerraformCommand,
+        [string]$ConfigFile,
+        [string]$Directory,
+        [string]$Workspace,
+        [switch]$Explicit
+    )
+
+    $PSBoundParameters.Remove('TerraformCommand') | Out-Null
+    Invoke-Terraposh -TerraformCommand "destroy ${TerraformCommand}" @PSBoundParameters
+}
+
+function Invoke-TerraposhDestroyAutoApprove {
+    param (
+        [string]$TerraformCommand,
+        [string]$ConfigFile,
+        [string]$Directory,
+        [string]$Workspace,
+        [switch]$Explicit
+    )
+
+    $PSBoundParameters.Remove('TerraformCommand') | Out-Null
+    Invoke-Terraposh -TerraformCommand "destroy -auto-approve ${TerraformCommand}" @PSBoundParameters
+}
+
 # Create aliases and export members
-Set-Alias -Name 'terraposh' -Value 'Invoke-Terraposh'
-Export-ModuleMember -Function 'Invoke-Terraposh' -Alias 'terraposh'
+$ExportedMembers = @{
+    terraposh = 'Invoke-Terraposh'
+    tpp       = 'Invoke-TerraposhPlan'
+    tpa       = 'Invoke-TerraposhApply'
+    tpd       = 'Invoke-TerraposhDestroy'
+    tpda      = 'Invoke-TerraposhDestroyAutoApprove'
+}
+
+$ExportedMembers.Keys | ForEach-Object { Set-Alias -Name $_ -Value $ExportedMembers[$_] }
+Export-ModuleMember -Function '*' -Alias '*'

@@ -16,6 +16,6 @@ indent_size = 4
 [{Dockerfile,*.Dockerfile}]
 indent_size = 2
 
-# PowerShell
+# JSON
 [*.json]
 indent_size = 4

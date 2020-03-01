@@ -30,7 +30,7 @@
     Copyright            = '(c) Steve Mastrorocco. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description          = 'PowerShell module for wrapping the Terraform CLI, and by default will run within Docker'
+    Description          = 'PowerShell module for wrapping the Terraform CLI'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion    = '6.0'
@@ -69,7 +69,13 @@
     # NestedModules = @()
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-    FunctionsToExport    = @('Invoke-Terraposh')
+    FunctionsToExport    = @(
+        'Invoke-Terraposh',
+        'Invoke-TerraposhPlan',
+        'Invoke-TerraposhApply',
+        'Invoke-TerraposhDestroy',
+        'Invoke-TerraposhDestroyAutoApprove'
+    )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
     # CmdletsToExport = @()
@@ -78,7 +84,13 @@
     # VariablesToExport = ''
 
     # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
-    AliasesToExport      = @('terraposh')
+    AliasesToExport      = @(
+        'terraposh',
+        'tpp',
+        'tpa',
+        'tpd',
+        'tpda'
+    )
 
     # DSC resources to export from this module
     # DscResourcesToExport = @()
