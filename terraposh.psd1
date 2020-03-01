@@ -30,7 +30,7 @@
     Copyright            = '(c) Steve Mastrorocco. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description          = 'PowerShell module for wrapping the Terraform CLI'
+    Description          = 'PowerShell wrapper for running Terraform'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion    = '6.0'
