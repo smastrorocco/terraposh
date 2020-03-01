@@ -10,15 +10,13 @@ For [Terraform workspaces](https://www.terraform.io/docs/state/workspaces.html),
 
 ### terraform plan
 
-> `terraposh plan`
-
-> `tpp`
+- `terraposh plan`
+- `tpp`
 
 ### terraform apply
 
-> `terraposh apply`
-
-> `tpa`
+- `terraposh apply`
+- `tpa`
 
 ### terraform destroy
 
