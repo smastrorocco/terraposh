@@ -35,19 +35,31 @@ function Invoke-Terraposh {
         else {
             switch -Regex ($TerraformCommand) {
                 '^plan|^apply' {
-                    Clear-TerraformEnvironment
-                    Invoke-TerraformCommand -Command 'init'
-                    Set-TerraformWorkspace -Workspace $Workspace
+                    try {
+                        Invoke-TerraformCommand -Command 'init'
+                    }
+                    catch {
+                        Clear-TerraformEnvironment
+                        Invoke-TerraformCommand -Command 'init'
+                    }
+
+                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange
                     Invoke-TerraformCommand -Command $TerraformCommand
                 }
                 '^destroy' {
-                    Clear-TerraformEnvironment
-                    Invoke-TerraformCommand -Command 'init'
-                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -PassThru
+                    try {
+                        Invoke-TerraformCommand -Command 'init'
+                    }
+                    catch {
+                        Clear-TerraformEnvironment
+                        Invoke-TerraformCommand -Command 'init'
+                    }
+
+                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru
                     Invoke-TerraformCommand -Command $TerraformCommand
                     
                     if ($Workspace -ne 'default') {
-                        Set-TerraformWorkspace -Workspace 'default'
+                        Set-TerraformWorkspace -Workspace 'default' -InitOnChange
                         Invoke-TerraformCommand -Command "workspace delete ${Workspace}"
                     }
                 }
@@ -157,6 +169,7 @@ function Get-TerraformWorkspaceName {
 function Set-TerraformWorkspace {
     param (
         [string]$Workspace,
+        [switch]$InitOnChange,
         [switch]$PassThru
     )
 
@@ -173,16 +186,22 @@ function Set-TerraformWorkspace {
         Write-Verbose -Message "Current workspace is already ${Workspace}"
     }
     else {
-        $CurrentWorkspacesAvailable = Invoke-TerraformCommand -Command 'workspace list' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $CurrentWorkspacesAvailable = Invoke-TerraformCommand -Command 'workspace list' | `
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | `
+            ForEach-Object { $_.TrimStart('*').Trim() }
         Write-Verbose -Message "Current workspaces available: $($CurrentWorkspacesAvailable -join ', ')"
 
-        if ($CurrentWorkspacesAvailable -cmatch $Workspace) {
+        if ($CurrentWorkspacesAvailable -ccontains $Workspace) {
             Write-Verbose -Message "${Workspace} already exists, selecting it"
             Invoke-TerraformCommand -Command "workspace select ${Workspace}" | Out-Null
         }
         else {
             Write-Verbose -Message "${Workspace} doesn't exist, creating it"
             Invoke-TerraformCommand -Command "workspace new ${Workspace}" | Out-Null
+        }
+
+        if ($InitOnChange) {
+            Invoke-TerraformCommand -Command 'init'
         }
     }
 
