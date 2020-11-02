@@ -59,7 +59,7 @@ function Invoke-Terraposh {
                     Invoke-TerraformCommand -Command $TerraformCommand
                     
                     if ($Workspace -ne 'default') {
-                        Set-TerraformWorkspace -Workspace 'default' -InitOnChange
+                        Set-TerraformWorkspace -Workspace 'default'
                         Invoke-TerraformCommand -Command "workspace delete ${Workspace}"
                     }
                 }
