@@ -44,6 +44,8 @@ The config file can contain any number of `TF_CLI_ARGS` and they will all be loa
 
 ```json
 {
+    "TerraformVersion": "1.6.3",
+    "CreateHardLink": true,
     "TF_CLI_ARGS_init": "-backend=true -upgrade=true -backend-config=backend.tfvars -reconfigure",
     "TF_CLI_ARGS_plan": "-detailed-exitcode -parallelism=20 -out=.terraform/plan.bin -var-file=development.tfvars",
     "TF_CLI_ARGS_apply": "-parallelism=20 .terraform/plan.bin",
@@ -63,6 +65,8 @@ All functions support the same params.
 [string]$Directory        # Directory of Terraform root module code
 [string]$Workspace        # Terraform workspace name
 [switch]$Explicit         # Used to bypass automatic sequencing of init, workspace, <command> and will instead just run the provided command only
+[string]$Version          # The version of Terraform to run, will automatically be downloaded if not already vendored
+[switch]$CreateHardLink   # If present, Terraposh will automatically create a HardLink to the Terraform vendored binary
 ```
 
 ### `terraposh` or `Invoke-Terraposh`
@@ -78,6 +82,8 @@ SYNTAX
         [-Directory <string>]
         [-Workspace <string>]
         [-Explicit]
+        [-Version <string>]
+        [-CreateHardLink]
 
 ALIASES
     terraposh
@@ -96,6 +102,8 @@ SYNTAX
         [-Directory <string>]
         [-Workspace <string>]
         [-Explicit]
+        [-Version <string>]
+        [-CreateHardLink]
 
 ALIASES
     tpp
@@ -114,6 +122,8 @@ SYNTAX
         [-Directory <string>]
         [-Workspace <string>]
         [-Explicit]
+        [-Version <string>]
+        [-CreateHardLink]
 
 ALIASES
     tpa
@@ -132,6 +142,8 @@ SYNTAX
         [-Directory <string>]
         [-Workspace <string>]
         [-Explicit]
+        [-Version <string>]
+        [-CreateHardLink]
 
 ALIASES
     tpd
@@ -150,6 +162,8 @@ SYNTAX
         [-Directory <string>]
         [-Workspace <string>]
         [-Explicit]
+        [-Version <string>]
+        [-CreateHardLink]
 
 ALIASES
     tpda
