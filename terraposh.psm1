@@ -1,16 +1,22 @@
-#Requires -Version 6
+#Requires -Version 7
 
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
+using namespace System.Management.Automation
+using namespace System.Web
+
+$ErrorActionPreference = [ActionPreference]::Stop
+$ProgressPreference = [ActionPreference]::SilentlyContinue
 
 function Invoke-Terraposh {
+    [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true, Position = 0)]
         [string]$TerraformCommand,
         [string]$ConfigFile,
         [string]$Directory,
         [string]$Workspace,
-        [switch]$Explicit
+        [switch]$Explicit,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
     # Load terraposh config
@@ -25,22 +31,28 @@ function Invoke-Terraposh {
         Push-Location -Path $Directory -StackName 'terraposh'
     }
 
+    # Splat
+    $TerraformCommandSplat = @{
+        Version        = [string]::IsNullOrWhiteSpace($Version) ? $Config.TerraformVersion : $Version
+        CreateHardLink = $CreateHardLink -or $Config.CreateHardLink
+    }
+
     try {
         $TerraformCommand = $TerraformCommand.Trim()
 
         # If not explicit, sequence for laziness
         if ($Explicit) {
-            Invoke-TerraformCommand -Command $TerraformCommand
+            Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
         }
         else {
             switch -Regex ($TerraformCommand) {
                 '^plan|^apply' {
                     try {
-                        Invoke-TerraformCommand -Command 'init'
+                        Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
                     catch {
                         Clear-TerraformEnvironment
-                        Invoke-TerraformCommand -Command 'init'
+                        Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
                     Set-TerraformWorkspace -Workspace $Workspace -InitOnChange
@@ -48,22 +60,22 @@ function Invoke-Terraposh {
                 }
                 '^destroy' {
                     try {
-                        Invoke-TerraformCommand -Command 'init'
+                        Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
                     catch {
                         Clear-TerraformEnvironment
-                        Invoke-TerraformCommand -Command 'init'
+                        Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
                     $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru
-                    Invoke-TerraformCommand -Command $TerraformCommand
+                    Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                     
                     if ($Workspace -ne 'default') {
                         Set-TerraformWorkspace -Workspace 'default'
-                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}"
+                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
                     }
                 }
-                default { Invoke-TerraformCommand -Command $TerraformCommand }
+                default { Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat }
             }
         }
     }
@@ -75,13 +87,19 @@ function Invoke-Terraposh {
     }
 }
 
-
 function Invoke-TerraformCommand {
     param (
-        [string]$Command
+        [string]$Command,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
-    $TerraformCommand = "terraform ${Command}"
+    $TerraformBinary = Get-TerraformBinary -Version $Version
+    $TerraformCommand = "${TerraformBinary} ${Command}"
+
+    if ($CreateHardLink) {
+        Set-TerraformBinaryHardLink -Value $TerraformBinary | Out-Null
+    }
 
     Write-Verbose -Message $TerraformCommand
     Invoke-Expression -Command $TerraformCommand
@@ -111,7 +129,6 @@ function Get-Config {
         }
 
         if (Test-Path -Path $SearchLoctaion) {
-            
             $ConfigFilePath = $SearchLoctaion
             break
         }
@@ -210,14 +227,97 @@ function Set-TerraformWorkspace {
     }
 }
 
+function Get-LatestTerraformVersion {
+    $Uri = 'https://checkpoint-api.hashicorp.com/v1/check/terraform'
+    $Response = Invoke-RestMethod -Method Get -Uri $Uri
+
+    return $Response.current_version
+}
+
+function Get-TerraformBinaryUri {
+    param (
+        [string]$Version
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        $Version = Get-LatestTerraformVersion
+    }
+
+    $VersionEncoded = [HttpUtility]::UrlEncode($Version)
+    $OSPart = [HttpUtility]::UrlEncode($IsWindows ? 'windows' : ($IsMacOS ? 'darwin' : 'linux'))
+    $ArchPart = [HttpUtility]::UrlEncode(${env:PROCESSOR_ARCHITECTURE}?.ToLower()) ?? 'amd64'
+    $Uri = "https://releases.hashicorp.com/terraform/${VersionEncoded}/terraform_${VersionEncoded}_${OSPart}_${ArchPart}.zip"
+
+    return $Uri
+}
+
+function Get-TerraformBinary {
+    param (
+        [string]$Version
+    )
+
+    $Uri = Get-TerraformBinaryUri -Version $Version
+    $FileName = $Uri -split '/' | Select-Object -Last 1
+    $OutDirectory = Set-TerraformVendoredDirectory
+    $OutFile = Join-Path -Path $OutDirectory -ChildPath $FileName
+
+    if (-not (Test-Path -Path $OutFile)) {
+        Invoke-RestMethod -Method Get -Uri $Uri -OutFile $OutFile | Out-Null
+    }
+
+    $ExpandDirectory = Join-Path -Path $OutDirectory -ChildPath $FileName.Trim('.zip')
+    $BinaryFileName = Get-TerraformBinaryFileName
+    $BinaryFile = Join-Path -Path $ExpandDirectory -ChildPath $BinaryFileName
+
+    if (-not (Test-Path -Path $BinaryFile)) {
+        Expand-Archive -Path $OutFile -DestinationPath $ExpandDirectory -Force | Out-Null
+    }
+
+    return $BinaryFile
+}
+
+function Get-TerraformBinaryFileName {
+    return ($IsWindows ? 'terraform.exe' : 'terraform')
+}
+
+function Set-TerraformBinaryHardLink {
+    param (
+        [string]$Value
+    )
+
+    $VendoredDirectory = Set-TerraformVendoredDirectory
+    $BinaryFileName = Get-TerraformBinaryFileName
+    $HardLinkPath = Join-Path -Path $VendoredDirectory -ChildPath $BinaryFileName
+    $HardLink = New-Item -ItemType HardLink -Path $HardLinkPath -Value $Value -Force
+
+    return $HardLink.FullName
+}
+
+function Set-TerraformVendoredDirectory {
+    if (-not (Test-Path -Path $HOME)) {
+        Write-Error "Unable to access HOME directory: ${HOME}"
+    }
+
+    $Directory = Join-Path -Path $HOME -ChildPath '.terraposh' -AdditionalChildPath 'vendored'
+
+    if (-not (Test-Path -Path $Directory)) {
+        New-Item -Path $Directory -ItemType Directory -Force | Out-Null
+    }
+
+    return $Directory
+}
+
 # Helper functions
 function Invoke-TerraposhPlan {
+    [CmdletBinding()]
     param (
         [string]$TerraformCommand,
         [string]$ConfigFile,
         [string]$Directory,
         [string]$Workspace,
-        [switch]$Explicit
+        [switch]$Explicit,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -225,12 +325,15 @@ function Invoke-TerraposhPlan {
 }
 
 function Invoke-TerraposhApply {
+    [CmdletBinding()]
     param (
         [string]$TerraformCommand,
         [string]$ConfigFile,
         [string]$Directory,
         [string]$Workspace,
-        [switch]$Explicit
+        [switch]$Explicit,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -238,12 +341,15 @@ function Invoke-TerraposhApply {
 }
 
 function Invoke-TerraposhDestroy {
+    [CmdletBinding()]
     param (
         [string]$TerraformCommand,
         [string]$ConfigFile,
         [string]$Directory,
         [string]$Workspace,
-        [switch]$Explicit
+        [switch]$Explicit,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -251,12 +357,15 @@ function Invoke-TerraposhDestroy {
 }
 
 function Invoke-TerraposhDestroyAutoApprove {
+    [CmdletBinding()]
     param (
         [string]$TerraformCommand,
         [string]$ConfigFile,
         [string]$Directory,
         [string]$Workspace,
-        [switch]$Explicit
+        [switch]$Explicit,
+        [string]$Version,
+        [switch]$CreateHardLink
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -273,4 +382,6 @@ $ExportedMembers = @{
 }
 
 $ExportedMembers.Keys | ForEach-Object { Set-Alias -Name $_ -Value $ExportedMembers[$_] }
-Export-ModuleMember -Function '*' -Alias '*'
+Export-ModuleMember `
+    -Function ($ExportedMembers.Values | Out-String -Stream) `
+    -Alias ($ExportedMembers.Keys | Out-String -Stream)

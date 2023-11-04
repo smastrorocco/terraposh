@@ -1,4 +1,6 @@
 {
+    "TerraformVersion": "",
+    "CreateHardLink": false,
     "TF_CLI_ARGS_init": "",
     "TF_CLI_ARGS_plan": "",
     "TF_CLI_ARGS_apply": "",

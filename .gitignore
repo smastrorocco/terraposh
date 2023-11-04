@@ -1,3 +1,4 @@
 .tmp/
 .terraform/
 terraform.tfstate.d/
+.vscode/launch.json
