@@ -1,5 +1,6 @@
 #Requires -Version 7
 
+using namespace System.Collections
 using namespace System.Management.Automation
 using namespace System.Web
 
@@ -19,25 +20,25 @@ function Invoke-Terraposh {
         [switch]$CreateHardLink
     )
 
-    # Load terraposh config
-    $Config = Get-Config -File $ConfigFile
-
-    # Set Terraform environment variables
-    Set-TerraformEnvironmentVariables -Config $Config
-
     # Push to directory
     if (-not [string]::IsNullOrWhiteSpace($Directory)) {
         $Directory = (Resolve-Path -Path $Directory).Path
         Push-Location -Path $Directory -StackName 'terraposh'
     }
 
-    # Splat
-    $TerraformCommandSplat = @{
-        Version        = [string]::IsNullOrWhiteSpace($Version) ? $Config.TerraformVersion : $Version
-        CreateHardLink = $CreateHardLink -or $Config.CreateHardLink
-    }
-
     try {
+        # Load terraposh config
+        $Config = Get-Config -File $ConfigFile
+
+        # Set Terraform environment variables
+        Set-TerraformEnvironmentVariables -Config $Config
+
+        # Splat
+        $TerraformCommandSplat = @{
+            Version        = [string]::IsNullOrWhiteSpace($Version) ? $Config.TerraformVersion : $Version
+            CreateHardLink = $CreateHardLink -or $Config.CreateHardLink
+        }
+
         $TerraformCommand = $TerraformCommand.Trim()
 
         # If not explicit, sequence for laziness
@@ -79,9 +80,6 @@ function Invoke-Terraposh {
             }
         }
     }
-    catch {
-        throw $_
-    }
     finally {
         Pop-Location -StackName 'terraposh' -ErrorAction Ignore
     }
@@ -110,34 +108,67 @@ function Invoke-TerraformCommand {
     }
 }
 
+function Merge-Hashtable {
+    param (
+        [hashtable]$HT1,
+        [hashtable]$HT2
+    )
+
+    $TempHT = $HT1.Clone()
+
+    foreach ($Key in $HT2.Keys) {
+        if ($HT1.ContainsKey($Key)) {
+            if ($HT1[$Key] -is [hashtable] -and $HT2[$Key] -is [hashtable]) {
+                $TempHT[$Key] = Merge-Hashtable -HT1 $HT1[$Key] -HT2 $HT2[$Key]
+                continue
+            }
+        }
+
+        $TempHT[$Key] = $HT2[$Key]
+    }
+
+    return $TempHT
+}
+
 function Get-Config {
     param (
         [string]$File
     )
 
-    $SearchLoctaions = @(
-        $File,
-        $env:TERRAPOSH_CONFIG_JSON
-    )
+    # serach order/precedence (last wins)
+    # - user profile ~/.terraposh.config.json
+    # - git repo search (if in git repo), top of repo -> closest to working directory
+    # - file param
+    # - env var
 
-    # Default config
-    $ConfigFilePath = Join-Path -Path $PSScriptRoot -ChildPath '.terraposh.config.json'
+    $SearchLoctaions = [ArrayList]::new()
+
+    $UserProfileConfig = Join-Path -Path $HOME -ChildPath '.terraposh.config.json'
+    $GitRepoConfigFiles = Get-GitRepoConfigFiles
+    $EnvVarConfigFile = $env:TERRAPOSH_CONFIG_JSON
+
+    $SearchLoctaions.Add($UserProfileConfig) | Out-Null
+    $GitRepoConfigFiles | ForEach-Object { $SearchLoctaions.Add($_) | Out-Null } 
+    $SearchLoctaions.Add($File) | Out-Null
+    $SearchLoctaions.Add($EnvVarConfigFile) | Out-Null
+    $SearchLoctaions = $SearchLoctaions | Get-Unique
+
+    Write-Verbose "Search Locations:`n$($SearchLoctaions -join "`n")"
+
+    $Config = @{}
 
     foreach ($SearchLoctaion in $SearchLoctaions) {
         if ([string]::IsNullOrWhiteSpace($SearchLoctaion)) {
             continue
         }
 
-        if (Test-Path -Path $SearchLoctaion) {
-            $ConfigFilePath = $SearchLoctaion
-            break
+        if (-not (Test-Path -Path $SearchLoctaion)) {
+            continue
         }
 
-        throw (New-Object -TypeName System.IO.FileNotFoundException -ArgumentList "Config file not found: ${SearchLoctaion}")
+        $SearchLocationConfig = Get-Content -Path $SearchLoctaion -Raw | ConvertFrom-Json -AsHashtable
+        $Config = Merge-Hashtable -HT1 $Config -HT2 $SearchLocationConfig
     }
-
-    Write-Verbose -Message "Config file: ${ConfigFilePath}"
-    $Config = Get-Content -Path $ConfigFilePath -Raw | ConvertFrom-Json -AsHashtable
 
     return $Config
 }
@@ -169,6 +200,57 @@ function Get-GitBranchName {
     }
 
     return $GitBranchName
+}
+
+function Test-GitRepo {
+    $GitCommand = 'git rev-parse --is-inside-work-tree'
+    $IsGitRepo = $true
+    Invoke-Expression -Command $GitCommand *>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        $IsGitRepo = $false
+    }
+
+    return $IsGitRepo
+}
+
+function Get-GitTopLevel {
+    $GitCommand = 'git rev-parse --show-toplevel'
+    $GitTopLevel = Invoke-Expression -Command $GitCommand
+
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorMessage = "Git command failed with non-zero exit code: ${LASTEXITCODE}"
+        throw ($ErrorMessage, $GitCommand -join "`n")
+    }
+
+    return ($GitTopLevel | Resolve-Path).Path
+}
+
+function Get-GitRepoConfigFiles {
+    $ConfigFiles = [ArrayList]::new()
+
+    if (-not (Test-GitRepo)) {
+        return $ConfigFiles
+    }
+
+    $GitTopLevel = Get-GitTopLevel
+    $CurrentDirectory = ($PWD | Resolve-Path).Path
+    $ConfigFileName = '.terraposh.config.json'
+
+    do {
+        $IsTopLevel = $CurrentDirectory -eq $GitTopLevel
+        $ConfigFilePath = Join-Path -Path $CurrentDirectory -ChildPath $ConfigFileName
+
+        if (Test-Path -Path $ConfigFilePath) {
+            $ConfigFiles.Add($ConfigFilePath) | Out-Null
+        }
+
+        $CurrentDirectory = (Join-Path -Path $CurrentDirectory -ChildPath '..' | Resolve-Path).Path
+    } until ($IsTopLevel)
+
+    $ConfigFiles.Reverse()
+
+    return [arraylist]$ConfigFiles
 }
 
 function Clear-TerraformEnvironment {
@@ -382,6 +464,6 @@ $ExportedMembers = @{
 }
 
 $ExportedMembers.Keys | ForEach-Object { Set-Alias -Name $_ -Value $ExportedMembers[$_] }
-Export-ModuleMember `
-    -Function ($ExportedMembers.Values | Out-String -Stream) `
-    -Alias ($ExportedMembers.Keys | Out-String -Stream)
+$ExportedFunctions = $ExportedMembers.Values | Out-String -Stream
+$ExportedAliases = $ExportedMembers.Keys | Out-String -Stream
+Export-ModuleMember -Function $ExportedFunctions -Alias $ExportedAliases

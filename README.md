@@ -36,9 +36,12 @@ Import-Module 'terraposh.psd1' -Force
 
 When a `terraposh` command is executed, it will look for a config file. This config file is a JSON file containing the values to populate Terraform CLI environment variables. A default one is provided within the module with empty values. The search order for a config is:
 
-1. `-ConfigFile` parameter
-2. `TERRAPOSH_CONFIG_JSON` environment variable
-3. `.terraposh.config.json` default config file from this repo
+1. `~/.terraposh.config.json`
+2. If in a Git repo, it will look for `.terraposh.config.json`, starting at the current directory, or `-Directory`, and going up until it reaches the root of the repo. Files closest to the starting directory will take precedence over one futher up.
+3. `-ConfigFile` parameter
+4. `TERRAPOSH_CONFIG_JSON` environment variable
+
+Items further down the list take precedence over higher ones, with the environment variable being the highest.
 
 The config file can contain any number of `TF_CLI_ARGS` and they will all be loaded.  An example would be:
 
