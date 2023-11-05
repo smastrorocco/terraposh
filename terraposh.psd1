@@ -7,21 +7,21 @@
 #
 
 @{
-    RootModule           = 'terraposh.psm1'
-    ModuleVersion        = '1.1.0'
-    GUID                 = 'c9cec8e5-e1ed-48ca-993d-d92304e387ee'
-    Author               = 'Steve Mastrorocco'
-    Copyright            = '(c) Steve Mastrorocco. All rights reserved.'
-    Description          = 'PowerShell wrapper for running Terraform'
-    PowerShellVersion    = '7.0'
-    FunctionsToExport    = @(
+    RootModule        = 'terraposh.psm1'
+    ModuleVersion     = '2.0.0'
+    GUID              = 'c9cec8e5-e1ed-48ca-993d-d92304e387ee'
+    Author            = 'Steve Mastrorocco'
+    Copyright         = '(c) Steve Mastrorocco. All rights reserved.'
+    Description       = 'PowerShell wrapper for running Terraform'
+    PowerShellVersion = '7.0'
+    FunctionsToExport = @(
         'Invoke-Terraposh',
         'Invoke-TerraposhPlan',
         'Invoke-TerraposhApply',
         'Invoke-TerraposhDestroy',
         'Invoke-TerraposhDestroyAutoApprove'
     )
-    AliasesToExport      = @(
+    AliasesToExport   = @(
         'terraposh',
         'tpp',
         'tpa',
