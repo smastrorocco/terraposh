@@ -56,8 +56,8 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange
-                    Invoke-TerraformCommand -Command $TerraformCommand
+                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
+                    Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                 }
                 '^destroy' {
                     try {
@@ -68,11 +68,11 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru
+                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
                     Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                     
                     if ($Workspace -ne 'default') {
-                        Set-TerraformWorkspace -Workspace 'default'
+                        Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
                         Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
                     }
                 }
@@ -269,38 +269,45 @@ function Set-TerraformWorkspace {
     param (
         [string]$Workspace,
         [switch]$InitOnChange,
-        [switch]$PassThru
+        [switch]$PassThru,
+        [string]$Version,
+        [string]$CreateHardLink
     )
 
     if ([string]::IsNullOrWhiteSpace($Workspace)) {
         $Workspace = Get-TerraformWorkspaceName
     }
+
+    $TerraformCommandSplat = @{
+        Version        = $Version
+        CreateHardLink = $CreateHardLink
+    }
     
     Write-Verbose -Message "Workspace name: ${Workspace}"
 
-    $CurrentWorkspace = Invoke-TerraformCommand -Command 'workspace show'
+    $CurrentWorkspace = Invoke-TerraformCommand -Command 'workspace show' @TerraformCommandSplat
     Write-Verbose -Message "Current workspace: ${CurrentWorkspace}"
 
     if ($Workspace -eq $CurrentWorkspace) {
         Write-Verbose -Message "Current workspace is already ${Workspace}"
     }
     else {
-        $CurrentWorkspacesAvailable = Invoke-TerraformCommand -Command 'workspace list' | `
+        $CurrentWorkspacesAvailable = Invoke-TerraformCommand -Command 'workspace list' @TerraformCommandSplat | `
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | `
             ForEach-Object { $_.TrimStart('*').Trim() }
         Write-Verbose -Message "Current workspaces available: $($CurrentWorkspacesAvailable -join ', ')"
 
         if ($CurrentWorkspacesAvailable -ccontains $Workspace) {
             Write-Verbose -Message "${Workspace} already exists, selecting it"
-            Invoke-TerraformCommand -Command "workspace select ${Workspace}" | Out-Null
+            Invoke-TerraformCommand -Command "workspace select ${Workspace}" @TerraformCommandSplat | Out-Null
         }
         else {
             Write-Verbose -Message "${Workspace} doesn't exist, creating it"
-            Invoke-TerraformCommand -Command "workspace new ${Workspace}" | Out-Null
+            Invoke-TerraformCommand -Command "workspace new ${Workspace}" @TerraformCommandSplat | Out-Null
         }
 
         if ($InitOnChange) {
-            Invoke-TerraformCommand -Command 'init'
+            Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
         }
     }
 
@@ -370,9 +377,15 @@ function Set-TerraformBinaryHardLink {
     $VendoredDirectory = Set-TerraformVendoredDirectory
     $BinaryFileName = Get-TerraformBinaryFileName
     $HardLinkPath = Join-Path -Path $VendoredDirectory -ChildPath $BinaryFileName
-    $HardLink = New-Item -ItemType HardLink -Path $HardLinkPath -Value $Value -Force
 
-    return $HardLink.FullName
+    try {
+        New-Item -ItemType HardLink -Path $HardLinkPath -Value $Value -Force | Out-Null
+    }
+    catch {
+        Write-Warning "Failed to create HardLink: ${HardLinkPath}"
+    }
+
+    return $HardLinkPath
 }
 
 function Set-TerraformVendoredDirectory {
