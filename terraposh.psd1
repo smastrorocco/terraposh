@@ -8,7 +8,7 @@
 
 @{
     RootModule        = 'terraposh.psm1'
-    ModuleVersion     = '2.0.1'
+    ModuleVersion     = '2.0.2'
     GUID              = 'c9cec8e5-e1ed-48ca-993d-d92304e387ee'
     Author            = 'Steve Mastrorocco'
     Copyright         = '(c) Steve Mastrorocco. All rights reserved.'
