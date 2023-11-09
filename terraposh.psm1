@@ -271,7 +271,7 @@ function Set-TerraformWorkspace {
         [switch]$InitOnChange,
         [switch]$PassThru,
         [string]$Version,
-        [string]$CreateHardLink
+        [switch]$CreateHardLink
     )
 
     if ([string]::IsNullOrWhiteSpace($Workspace)) {
