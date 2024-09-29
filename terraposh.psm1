@@ -278,6 +278,10 @@ function Set-TerraformWorkspace {
         $Workspace = Get-TerraformWorkspaceName
     }
 
+    # normalized workspace name: letters, numbers, hyphens, underscores
+    # https://developer.hashicorp.com/terraform/cloud-docs/workspaces/create#create-a-workspace
+    $Workspace = $Workspace -replace '[^a-zA-Z0-9\-_]', '_'
+
     $TerraformCommandSplat = @{
         Version        = $Version
         CreateHardLink = $CreateHardLink
