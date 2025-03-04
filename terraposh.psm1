@@ -323,8 +323,9 @@ function Set-TerraformWorkspace {
 function Get-LatestTerraformVersion {
     $Uri = 'https://checkpoint-api.hashicorp.com/v1/check/terraform'
     $Response = Invoke-RestMethod -Method Get -Uri $Uri
+    $SemVer = $Response.current_version.TrimStart('v')
 
-    return $Response.current_version
+    return $SemVer
 }
 
 function Get-TerraformBinaryUri {
