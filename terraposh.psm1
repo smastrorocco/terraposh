@@ -35,15 +35,16 @@ function Invoke-Terraposh {
         Set-TerraformEnvironmentVariables -Config $Config
 
         # Splat
+        $CreateHardLink = $CreateHardLink -or $Config.CreateHardLink
+        $SkipWorkspace = $SkipWorkspace -or $Config.SkipWorkspace
+
         $TerraformCommandSplat = @{
             Version        = [string]::IsNullOrWhiteSpace($Version) ? $Config.TerraformVersion : $Version
-            CreateHardLink = $CreateHardLink -or $Config.CreateHardLink
+            CreateHardLink = $CreateHardLink
+            SkipWorkspace  = $SkipWorkspace
         }
 
         $TerraformCommand = $TerraformCommand.Trim()
-
-        # Determine if workspace management should be skipped
-        $ShouldSkipWorkspace = $SkipWorkspace -or $Config.SkipWorkspace
 
         # If not explicit, sequence for laziness
         if ($Explicit) {
@@ -60,9 +61,7 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    if (-not $ShouldSkipWorkspace) {
-                        Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
-                    }
+                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
                     Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                 }
                 '^destroy' {
@@ -74,17 +73,12 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    if (-not $ShouldSkipWorkspace) {
-                        $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
-                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
-                        
-                        if ($Workspace -ne 'default') {
-                            Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
-                            Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
-                        }
-                    }
-                    else {
-                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
+                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
+                    Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
+
+                    if ($Workspace -ne 'default' -and (-not $SkipWorkspace)) {
+                        Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
+                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
                     }
                 }
                 default { Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat }
@@ -282,8 +276,12 @@ function Set-TerraformWorkspace {
         [switch]$InitOnChange,
         [switch]$PassThru,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
+
+    # short circut if skip
+    if ($SkipWorkspace) { return }
 
     if ([string]::IsNullOrWhiteSpace($Workspace)) {
         $Workspace = Get-TerraformWorkspaceName
