@@ -17,7 +17,8 @@ function Invoke-Terraposh {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     # Push to directory
@@ -41,6 +42,9 @@ function Invoke-Terraposh {
 
         $TerraformCommand = $TerraformCommand.Trim()
 
+        # Determine if workspace management should be skipped
+        $ShouldSkipWorkspace = $SkipWorkspace -or $Config.SkipWorkspace
+
         # If not explicit, sequence for laziness
         if ($Explicit) {
             Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
@@ -56,7 +60,9 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
+                    if (-not $ShouldSkipWorkspace) {
+                        Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
+                    }
                     Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                 }
                 '^destroy' {
@@ -68,12 +74,17 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
-                    Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
-                    
-                    if ($Workspace -ne 'default') {
-                        Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
-                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
+                    if (-not $ShouldSkipWorkspace) {
+                        $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
+                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
+                        
+                        if ($Workspace -ne 'default') {
+                            Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
+                            Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
+                        }
+                    }
+                    else {
+                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                     }
                 }
                 default { Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat }
@@ -135,7 +146,7 @@ function Get-Config {
         [string]$File
     )
 
-    # serach order/precedence (last wins)
+    # search order/precedence (last wins)
     # - user profile ~/.terraposh.config.json
     # - git repo search (if in git repo), top of repo -> closest to working directory
     # - file param
@@ -417,7 +428,8 @@ function Invoke-TerraposhPlan {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -433,7 +445,8 @@ function Invoke-TerraposhApply {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -449,7 +462,8 @@ function Invoke-TerraposhDestroy {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -465,7 +479,8 @@ function Invoke-TerraposhDestroyAutoApprove {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
