@@ -49,6 +49,7 @@ The config file can contain any number of `TF_CLI_ARGS` and they will all be loa
 {
     "TerraformVersion": "1.6.3",
     "CreateHardLink": true,
+    "SkipWorkspace": false,
     "TF_CLI_ARGS_init": "-backend=true -upgrade=true -backend-config=backend.tfvars -reconfigure",
     "TF_CLI_ARGS_plan": "-detailed-exitcode -parallelism=20 -out=.terraform/plan.bin -var-file=development.tfvars",
     "TF_CLI_ARGS_apply": "-parallelism=20 .terraform/plan.bin",
@@ -70,6 +71,7 @@ All functions support the same params.
 [switch]$Explicit         # Used to bypass automatic sequencing of init, workspace, <command> and will instead just run the provided command only
 [string]$Version          # The version of Terraform to run, will automatically be downloaded if not already vendored
 [switch]$CreateHardLink   # If present, Terraposh will automatically create a HardLink to the Terraform vendored binary
+[switch]$SkipWorkspace    # If present, Terraposh will skip the creation of a Terraform workspace during the init, plan, apply, and destroy process
 ```
 
 ### `terraposh` or `Invoke-Terraposh`
@@ -87,6 +89,7 @@ SYNTAX
         [-Explicit]
         [-Version <string>]
         [-CreateHardLink]
+        [-SkipWorkspace]
 
 ALIASES
     terraposh
@@ -107,6 +110,7 @@ SYNTAX
         [-Explicit]
         [-Version <string>]
         [-CreateHardLink]
+        [-SkipWorkspace]
 
 ALIASES
     tpp
@@ -127,6 +131,7 @@ SYNTAX
         [-Explicit]
         [-Version <string>]
         [-CreateHardLink]
+        [-SkipWorkspace]
 
 ALIASES
     tpa
@@ -147,6 +152,7 @@ SYNTAX
         [-Explicit]
         [-Version <string>]
         [-CreateHardLink]
+        [-SkipWorkspace]
 
 ALIASES
     tpd
@@ -167,6 +173,7 @@ SYNTAX
         [-Explicit]
         [-Version <string>]
         [-CreateHardLink]
+        [-SkipWorkspace]
 
 ALIASES
     tpda
