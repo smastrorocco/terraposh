@@ -17,7 +17,8 @@ function Invoke-Terraposh {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     # Push to directory
@@ -56,7 +57,9 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
+                    if (-not $SkipWorkspace -and -not $Config.SkipWorkspace) {
+                        Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
+                    }
                     Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                 }
                 '^destroy' {
@@ -68,12 +71,17 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
-                    Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
-                    
-                    if ($Workspace -ne 'default') {
-                        Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
-                        Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
+                    if (-not $SkipWorkspace -and -not $Config.SkipWorkspace) {
+                        $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
+                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
+                        
+                        if ($Workspace -ne 'default') {
+                            Set-TerraformWorkspace -Workspace 'default' @TerraformCommandSplat
+                            Invoke-TerraformCommand -Command "workspace delete ${Workspace}" @TerraformCommandSplat
+                        }
+                    }
+                    else {
+                        Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                     }
                 }
                 default { Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat }
@@ -417,7 +425,8 @@ function Invoke-TerraposhPlan {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -433,7 +442,8 @@ function Invoke-TerraposhApply {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -449,7 +459,8 @@ function Invoke-TerraposhDestroy {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
@@ -465,7 +476,8 @@ function Invoke-TerraposhDestroyAutoApprove {
         [string]$Workspace,
         [switch]$Explicit,
         [string]$Version,
-        [switch]$CreateHardLink
+        [switch]$CreateHardLink,
+        [switch]$SkipWorkspace
     )
 
     $PSBoundParameters.Remove('TerraformCommand') | Out-Null
