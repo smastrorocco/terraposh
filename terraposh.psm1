@@ -42,6 +42,9 @@ function Invoke-Terraposh {
 
         $TerraformCommand = $TerraformCommand.Trim()
 
+        # Determine if workspace management should be skipped
+        $ShouldSkipWorkspace = $SkipWorkspace -or $Config.SkipWorkspace
+
         # If not explicit, sequence for laziness
         if ($Explicit) {
             Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
@@ -57,7 +60,7 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    if (-not $SkipWorkspace -and -not $Config.SkipWorkspace) {
+                    if (-not $ShouldSkipWorkspace) {
                         Set-TerraformWorkspace -Workspace $Workspace -InitOnChange @TerraformCommandSplat
                     }
                     Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
@@ -71,7 +74,7 @@ function Invoke-Terraposh {
                         Invoke-TerraformCommand -Command 'init' @TerraformCommandSplat
                     }
 
-                    if (-not $SkipWorkspace -and -not $Config.SkipWorkspace) {
+                    if (-not $ShouldSkipWorkspace) {
                         $Workspace = Set-TerraformWorkspace -Workspace $Workspace -InitOnChange -PassThru @TerraformCommandSplat
                         Invoke-TerraformCommand -Command $TerraformCommand @TerraformCommandSplat
                         
@@ -143,7 +146,7 @@ function Get-Config {
         [string]$File
     )
 
-    # serach order/precedence (last wins)
+    # search order/precedence (last wins)
     # - user profile ~/.terraposh.config.json
     # - git repo search (if in git repo), top of repo -> closest to working directory
     # - file param
