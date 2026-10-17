@@ -8,12 +8,12 @@
 
 @{
     RootModule        = 'terraposh.psm1'
-    ModuleVersion     = '2.1.0'
+    ModuleVersion     = '2.2.0'
     GUID              = 'c9cec8e5-e1ed-48ca-993d-d92304e387ee'
     Author            = 'Steve Mastrorocco'
     Copyright         = '(c) Steve Mastrorocco. All rights reserved.'
     Description       = 'PowerShell wrapper for running Terraform'
-    PowerShellVersion = '7.0'
+    PowerShellVersion = '7.2'
     FunctionsToExport = @(
         'Invoke-Terraposh',
         'Invoke-TerraposhPlan',

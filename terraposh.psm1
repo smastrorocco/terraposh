@@ -1,4 +1,4 @@
-#Requires -Version 7
+#Requires -Version 7.2
 
 using namespace System.Collections
 using namespace System.Management.Automation
@@ -20,6 +20,8 @@ function Invoke-Terraposh {
         [switch]$CreateHardLink,
         [switch]$SkipWorkspace
     )
+
+    $script:VerifiedBinaries = @{}
 
     # Push to directory
     if (-not [string]::IsNullOrWhiteSpace($Directory)) {
@@ -337,21 +339,240 @@ function Get-LatestTerraformVersion {
     return $SemVer
 }
 
-function Get-TerraformBinaryUri {
+function Get-TerraformOS {
+    return ($IsWindows ? 'windows' : ($IsMacOS ? 'darwin' : 'linux'))
+}
+
+function Get-TerraformArchitecture {
     param (
-        [string]$Version
+        [string]$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    )
+
+    switch ($Architecture) {
+        'X64' { return 'amd64' }
+        'Arm64' { return 'arm64' }
+        'X86' { return '386' }
+        'Arm' { return 'arm' }
+        default { throw "Unsupported architecture for Terraform: ${Architecture}" }
+    }
+}
+
+function Get-TerraformRelease {
+    param (
+        [string]$Version,
+        [string]$Architecture,
+        [switch]$IsFallback
     )
 
     if ([string]::IsNullOrWhiteSpace($Version)) {
+        Write-Warning -Message 'No Terraform version pinned (TerraformVersion / -Version), resolving latest release.'
         $Version = Get-LatestTerraformVersion
     }
 
-    $VersionEncoded = [HttpUtility]::UrlEncode($Version)
-    $OSPart = [HttpUtility]::UrlEncode($IsWindows ? 'windows' : ($IsMacOS ? 'darwin' : 'linux'))
-    $ArchPart = [HttpUtility]::UrlEncode(${env:PROCESSOR_ARCHITECTURE}?.ToLower()) ?? 'amd64'
-    $Uri = "https://releases.hashicorp.com/terraform/${VersionEncoded}/terraform_${VersionEncoded}_${OSPart}_${ArchPart}.zip"
+    $Version = $Version.Trim().TrimStart('v')
 
-    return $Uri
+    if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') {
+        throw "Invalid Terraform version: '${Version}'"
+    }
+
+    $OSPart = Get-TerraformOS
+    $ArchPart = [string]::IsNullOrWhiteSpace($Architecture) ? (Get-TerraformArchitecture) : $Architecture
+    $Platform = "${OSPart}_${ArchPart}"
+    $FileName = "terraform_${Version}_${Platform}.zip"
+    $BaseUri = "https://releases.hashicorp.com/terraform/${Version}"
+    $OutDirectory = Set-TerraformVendoredDirectory
+    $ExpandDirectory = Join-Path -Path $OutDirectory -ChildPath ([System.IO.Path]::GetFileNameWithoutExtension($FileName))
+
+    return @{
+        Version         = $Version
+        Platform        = $Platform
+        IsFallback      = [bool]$IsFallback
+        FileName        = $FileName
+        Uri             = "${BaseUri}/${FileName}"
+        ChecksumsUri    = "${BaseUri}/terraform_${Version}_SHA256SUMS"
+        SignatureUri    = "${BaseUri}/terraform_${Version}_SHA256SUMS.${HashiCorpKeyId}.sig"
+        OutFile         = Join-Path -Path $OutDirectory -ChildPath $FileName
+        ExpandDirectory = $ExpandDirectory
+        BinaryFile      = Join-Path -Path $ExpandDirectory -ChildPath (Get-TerraformBinaryFileName)
+        VerifiedFile    = Join-Path -Path $ExpandDirectory -ChildPath ($IsFallback ? '.terraposh-sha256-fallback' : '.terraposh-sha256')
+    }
+}
+
+function Invoke-TerraformReleaseRequest {
+    param (
+        [string]$Uri,
+        [string]$OutFile
+    )
+
+    $ParsedUri = [uri]$Uri
+
+    if ($ParsedUri.Scheme -ne 'https' -or $ParsedUri.Host -ne 'releases.hashicorp.com') {
+        throw "Refusing to download from untrusted location: ${Uri}"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($OutFile)) {
+        Invoke-WebRequest -Method Get -Uri $ParsedUri -MaximumRedirection 0 -OutFile $OutFile | Out-Null
+        return
+    }
+
+    return , (Invoke-WebRequest -Method Get -Uri $ParsedUri -MaximumRedirection 0).RawContentStream.ToArray()
+}
+
+$HashiCorpKeyFile = Join-Path -Path $PSScriptRoot -ChildPath 'hashicorp.asc'
+$HashiCorpKeyFingerprint = 'C874011F0AB405110D02105534365D9472D7468F'
+$HashiCorpKeyId = '72D7468F'
+$BouncyCastleAssembly = Join-Path -Path $PSScriptRoot -ChildPath 'lib' -AdditionalChildPath 'BouncyCastle.Cryptography.dll'
+
+function Assert-TerraformChecksumsSignature {
+    param (
+        [byte[]]$ChecksumsBytes,
+        [byte[]]$SignatureBytes,
+        [string]$Source
+    )
+
+    if (-not ('Org.BouncyCastle.Bcpg.OpenPgp.PgpUtilities' -as [type])) {
+        Add-Type -Path $BouncyCastleAssembly
+    }
+
+    try {
+        $KeyStream = [System.IO.File]::OpenRead($HashiCorpKeyFile)
+
+        try {
+            $Keys = [Org.BouncyCastle.Bcpg.OpenPgp.PgpPublicKeyRingBundle]::new([Org.BouncyCastle.Bcpg.OpenPgp.PgpUtilities]::GetDecoderStream($KeyStream))
+        }
+        finally {
+            $KeyStream.Dispose()
+        }
+
+        $SignatureStream = [Org.BouncyCastle.Bcpg.OpenPgp.PgpUtilities]::GetDecoderStream([System.IO.MemoryStream]::new($SignatureBytes))
+        $Signatures = [Org.BouncyCastle.Bcpg.OpenPgp.PgpObjectFactory]::new($SignatureStream).NextPgpObject()
+        $Signature = $Signatures -is [Org.BouncyCastle.Bcpg.OpenPgp.PgpSignatureList] -and $Signatures.Count -eq 1 ? $Signatures[0] : $null
+        $Key = $Signature ? $Keys.GetPublicKey($Signature.KeyId) : $null
+        $Valid = $false
+
+        if ($Key) {
+            $PrimaryKey = $Keys.GetPublicKeyRing($Signature.KeyId).GetPublicKey()
+            $Signature.InitVerify($Key)
+            $Signature.Update($ChecksumsBytes)
+            $Valid = [System.Convert]::ToHexString($PrimaryKey.GetFingerprint()) -ceq $HashiCorpKeyFingerprint -and $Signature.Verify()
+        }
+    }
+    catch {
+        $Valid = $false
+    }
+
+    if (-not $Valid) {
+        throw "PGP signature verification failed for ${Source}, refusing to use it."
+    }
+
+    Write-Verbose -Message "Verified ${Source} is signed by ${HashiCorpKeyFingerprint}"
+}
+
+function Get-TerraformReleaseChecksums {
+    param (
+        [hashtable]$Release
+    )
+
+    $ChecksumsBytes = Invoke-TerraformReleaseRequest -Uri $Release.ChecksumsUri
+    $SignatureBytes = Invoke-TerraformReleaseRequest -Uri $Release.SignatureUri
+    Assert-TerraformChecksumsSignature -ChecksumsBytes $ChecksumsBytes -SignatureBytes $SignatureBytes -Source $Release.ChecksumsUri
+
+    $Checksums = @{}
+
+    foreach ($Line in ([System.Text.Encoding]::UTF8.GetString($ChecksumsBytes) -split "`n")) {
+        $Hash, $FileName = $Line.Trim() -split '\s+', 2
+
+        if ([string]::IsNullOrWhiteSpace($FileName)) {
+            continue
+        }
+
+        if ($Hash -notmatch '^[0-9a-fA-F]{64}$' -or $Checksums.ContainsKey($FileName)) {
+            throw "Malformed SHA256SUMS entry in $($Release.ChecksumsUri): ${Line}"
+        }
+
+        $Checksums[$FileName] = $Hash.ToLower()
+    }
+
+    return $Checksums
+}
+
+function Get-FileSha256 {
+    param (
+        [string]$Path
+    )
+
+    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLower()
+}
+
+$VerifiedBinaries = @{}
+
+function Get-TerraformCachedBinaryStatus {
+    param (
+        [string]$BinaryFile,
+        [string]$VerifiedFile
+    )
+
+    if (-not (Test-Path -Path $BinaryFile -PathType Leaf) -or -not (Test-Path -Path $VerifiedFile -PathType Leaf)) {
+        return 'Missing'
+    }
+
+    $BinaryHash = "$(Get-Content -Path $VerifiedFile -Raw -Force)".Trim()
+
+    if ($BinaryHash -cnotmatch '^[0-9a-f]{64}$') {
+        return 'Missing'
+    }
+
+    if ($script:VerifiedBinaries[$BinaryFile] -ceq $BinaryHash) {
+        return 'Valid'
+    }
+
+    if ((Get-FileSha256 -Path $BinaryFile) -cne $BinaryHash) {
+        return 'Modified'
+    }
+
+    $script:VerifiedBinaries[$BinaryFile] = $BinaryHash
+
+    return 'Valid'
+}
+
+function Wait-TerraposhLock {
+    param (
+        [string]$Path,
+        [int]$TimeoutSeconds = 600
+    )
+
+    $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+
+    while ($true) {
+        try {
+            return [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        }
+        catch [System.IO.IOException] {
+            $Exception = $_.Exception.InnerException ?? $_.Exception
+
+            if ($Exception.GetType() -ne [System.IO.IOException]) {
+                throw
+            }
+
+            if ([DateTime]::UtcNow -ge $Deadline) {
+                throw "Timed out after ${TimeoutSeconds}s waiting for another terraposh process to release ${Path}"
+            }
+
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
+function Expand-TerraformArchive {
+    param (
+        [hashtable]$Release
+    )
+
+    Remove-Item -Path $Release.ExpandDirectory -Recurse -Force -ErrorAction Ignore
+    Expand-Archive -Path $Release.OutFile -DestinationPath $Release.ExpandDirectory -Force | Out-Null
+    $BinaryHash = Get-FileSha256 -Path $Release.BinaryFile
+    Set-Content -Path $Release.VerifiedFile -Value $BinaryHash -NoNewline
+    $script:VerifiedBinaries[$Release.BinaryFile] = $BinaryHash
 }
 
 function Get-TerraformBinary {
@@ -359,24 +580,66 @@ function Get-TerraformBinary {
         [string]$Version
     )
 
-    $Uri = Get-TerraformBinaryUri -Version $Version
-    $FileName = $Uri -split '/' | Select-Object -Last 1
-    $OutDirectory = Set-TerraformVendoredDirectory
-    $OutFile = Join-Path -Path $OutDirectory -ChildPath $FileName
+    $Candidates = @(Get-TerraformRelease -Version $Version)
+    $NativeRelease = $Candidates[0]
 
-    if (-not (Test-Path -Path $OutFile)) {
-        Invoke-RestMethod -Method Get -Uri $Uri -OutFile $OutFile | Out-Null
+    if ((Get-TerraformArchitecture) -eq 'arm64' -and (Get-TerraformOS) -in @('darwin', 'windows')) {
+        $Candidates += Get-TerraformRelease -Version $NativeRelease.Version -Architecture 'amd64' -IsFallback
     }
 
-    $ExpandDirectory = Join-Path -Path $OutDirectory -ChildPath $FileName.Trim('.zip')
-    $BinaryFileName = Get-TerraformBinaryFileName
-    $BinaryFile = Join-Path -Path $ExpandDirectory -ChildPath $BinaryFileName
+    foreach ($Candidate in $Candidates) {
+        $Status = Get-TerraformCachedBinaryStatus -BinaryFile $Candidate.BinaryFile -VerifiedFile $Candidate.VerifiedFile
 
-    if (-not (Test-Path -Path $BinaryFile)) {
-        Expand-Archive -Path $OutFile -DestinationPath $ExpandDirectory -Force | Out-Null
+        if ($Status -eq 'Valid') {
+            return $Candidate.BinaryFile
+        }
+
+        if ($Status -eq 'Modified') {
+            Write-Warning -Message "Cached Terraform binary failed SHA-256 verification, re-extracting: $($Candidate.BinaryFile)"
+        }
     }
 
-    return $BinaryFile
+    $Checksums = Get-TerraformReleaseChecksums -Release $NativeRelease
+    $Release = $Candidates | Where-Object { $Checksums.ContainsKey($_.FileName) } | Select-Object -First 1
+
+    if (-not $Release) {
+        throw "Terraform $($NativeRelease.Version) has no published build for $($NativeRelease.Platform) in $($NativeRelease.ChecksumsUri)"
+    }
+
+    if ($Release.IsFallback) {
+        $Emulation = (Get-TerraformOS) -eq 'darwin' ? 'Rosetta 2' : 'x64 emulation'
+        Write-Warning -Message "Terraform $($Release.Version) has no $($NativeRelease.Platform) build, using $($Release.Platform) under ${Emulation}."
+    }
+
+    $ExpectedHash = $Checksums[$Release.FileName]
+    $Lock = Wait-TerraposhLock -Path "$($Release.OutFile).lock"
+
+    try {
+        if ((Get-TerraformCachedBinaryStatus -BinaryFile $Release.BinaryFile -VerifiedFile $Release.VerifiedFile) -eq 'Valid') {
+            return $Release.BinaryFile
+        }
+
+        if ((Test-Path -Path $Release.OutFile) -and (Get-FileSha256 -Path $Release.OutFile) -cne $ExpectedHash) {
+            Write-Warning -Message "Cached archive failed SHA-256 verification, re-downloading: $($Release.OutFile)"
+            Remove-Item -Path $Release.OutFile -Force
+        }
+
+        if (-not (Test-Path -Path $Release.OutFile)) {
+            Invoke-TerraformReleaseRequest -Uri $Release.Uri -OutFile $Release.OutFile
+
+            if ((Get-FileSha256 -Path $Release.OutFile) -cne $ExpectedHash) {
+                Remove-Item -Path $Release.OutFile -Force
+                throw "SHA-256 checksum mismatch for $($Release.Uri), refusing to use it."
+            }
+        }
+
+        Expand-TerraformArchive -Release $Release
+
+        return $Release.BinaryFile
+    }
+    finally {
+        $Lock.Dispose()
+    }
 }
 
 function Get-TerraformBinaryFileName {

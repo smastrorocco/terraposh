@@ -1,11 +1,35 @@
 name: Tests
+
 on:
   pull_request:
-    branches:
-      - master
+    branches: [master]
+
+permissions:
+  contents: read
 
 jobs:
-  placeholder:
-    runs-on: ubuntu-latest
+  pester:
+    name: Pester (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
     steps:
-      - run: echo "Workflow registered"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module -Name Pester -RequiredVersion 6.2.0 -Repository PSGallery -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          Import-Module -Name Pester -RequiredVersion 6.2.0
+          $Config = New-PesterConfiguration
+          $Config.Run.Path = './tests'
+          $Config.Run.Exit = $true
+          $Config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $Config
